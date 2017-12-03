@@ -12,10 +12,34 @@
 #include <roboticscape.h>
 #include <time.h>
 
+//variable declarations
+float theta_a=0;
+float theta_g=0;
+float theta_f=0;
+float theta_a_raw=0;
+float theta_g_raw = 0;
+float last_theta_a_raw = 0;
+float last_theta_g_raw = 0;
+float last_theta_a = 0;
+float last_theta_g = 0;
+struct timeval c_time, last_time;
+float dt = 0;
+float time_tot = 0;
+float wc = .5;
 
 // function declarations
 void on_pause_pressed();
 void on_pause_released();
+void comp_filter();
+//print thread function
+void *print_info(){
+	while(rc_get_state()!=EXITING){
+		printf("theta_a: %.4f theta_g %.5f  theta_f %.5f\r" ,theta_a,theta_g,theta_f);
+		rc_usleep(100000);
+	}
+	return 0;
+}
+
 
 
 /*******************************************************************************
@@ -39,29 +63,28 @@ int main(){
 	rc_imu_data_t imu_data; // imu data struct init
 	rc_imu_config_t imu_conf = rc_default_imu_config();
 	imu_conf.enable_magnetometer=1;
-	float theta_a_raw;
-	float theta_a;
-	float theta_g;
-	float theta_f;
-	float theta_g_raw = 0;
-	float last_theta_a_raw = 0;
-	float last_theta_g_raw = 0;
-	float last_theta_a = 0;
-	float last_theta_g = 0;
-	struct timeval c_time, last_time;
 	gettimeofday(&last_time, NULL);
-	float dt = 0;
-	float time_tot = 0;
-	float wc = .5;
+
 	//record data
-	FILE *f = fopen("data.txt", "w");
+	//FILE *f = fopen("data.txt", "w");
+	//inititalize imu
 	if(rc_initialize_imu(&imu_data, imu_conf)){
 		fprintf(stderr,"rc_initialize_imu_failed\n");
 		return -1;
 	}
+	//initialize dmp
+	if(rc_initialize_imu_dmp(&imu_data,imu_conf)){
+		printf("dmp init failed");
+		return -1;
+	}
+	rc_set_imu_interrupt_func(&comp_filter);
 
 	// done initializing so set state to RUNNING
 	rc_set_state(RUNNING); 
+
+	//make second thread
+	pthread_t print_thread;
+	pthread_create(&print_thread,NULL,print_info,(void*) NULL);
 
 	// Keep looping until state changes to EXITING
 	while(rc_get_state()!=EXITING){
@@ -86,15 +109,8 @@ int main(){
 			theta_a_raw = -atan2(imu_data.accel[2],imu_data.accel[1]);
 			//calculate rotation from start with gyro data
 			theta_g_raw = theta_g_raw + (float)dt*(imu_data.gyro[0]*DEG_TO_RAD) ;
-			//apply low pass filter on accelerometer
-			theta_a = (wc*dt*last_theta_a_raw)+((1-(wc*dt))*last_theta_a);
-			//apply high pass filter on theta_g_raw
-			theta_g = (1-(wc*dt))*last_theta_g + theta_g_raw - last_theta_g_raw;
 			//get theta f
 			theta_f = theta_a + theta_g;
-			//print
-			fprintf(f,"%.5f %.5f %.5f %.5f\r",time_tot,theta_a,theta_g,theta_f);
-			printf("theta_a_raw: %.4f theta_a: %.4f theta_g_raw %.5f  theta_g %.5f  theta_f %.5f\r" , theta_a_raw,theta_a,theta_g_raw,theta_g,theta_f);
 			//set last stuff
 			last_time = c_time;
 			last_theta_a = theta_a;
@@ -102,6 +118,7 @@ int main(){
 			last_theta_g_raw = theta_g_raw;
 			last_theta_a_raw = theta_a_raw;
 			time_tot = time_tot + dt;
+			//printf("theta_a_raw: %.4f theta_a: %.4f theta_g_raw %.5f  theta_g %.5f  theta_f %.5f" , theta_a_raw,theta_a,theta_g_raw,theta_g,theta_f);
 		}
 		else if(rc_get_state()==PAUSED){
 			// do other things
@@ -109,14 +126,15 @@ int main(){
 			rc_set_led(RED, ON);
 		}
 		// always sleep at some point
-		usleep(10000);
+		rc_usleep(10000);
 
 	}
 	
 	// exit cleanly
+	pthread_join(print_thread, NULL);
 	rc_power_off_imu();
 	rc_cleanup(); 
-	fclose(f);
+	//fclose(f);
 	return 0;
 }
 
@@ -153,3 +171,12 @@ void on_pause_pressed(){
 	rc_set_state(EXITING);
 	return;
 }
+
+void comp_filter(){
+	//apply low pass filter on accelerometer
+	theta_a = (wc*dt*last_theta_a_raw)+((1-(wc*dt))*last_theta_a);
+	//apply high pass filter on theta_g_raw
+	theta_g = (1-(wc*dt))*last_theta_g + theta_g_raw - last_theta_g_raw;
+}
+
+
