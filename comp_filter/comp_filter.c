@@ -12,33 +12,13 @@
 #include <roboticscape.h>
 #include <time.h>
 
-//variable declarations
-float theta_a=0;
-float theta_g=0;
-float theta_f=0;
-float theta_a_raw=0;
-float theta_g_raw = 0;
-float last_theta_a_raw = 0;
-float last_theta_g_raw = 0;
-float last_theta_a = 0;
-float last_theta_g = 0;
-struct timeval c_time, last_time;
-float dt = 0;
-float time_tot = 0;
-float wc = .5;
+
 
 // function declarations
 void on_pause_pressed();
 void on_pause_released();
-void comp_filter();
-//print thread function
-void *print_info(){
-	while(rc_get_state()!=EXITING){
-		printf("theta_a: %.4f theta_g %.5f  theta_f %.5f\r" ,theta_a,theta_g,theta_f);
-		rc_usleep(100000);
-	}
-	return 0;
-}
+
+
 
 
 
@@ -60,13 +40,73 @@ int main(){
 	// do your own initialization here
 	rc_set_pause_pressed_func(&on_pause_pressed);
 	rc_set_pause_released_func(&on_pause_released);
+
+	//init variables
+	float theta_a=0;
+	float theta_g=0;
+	float theta_f=0;
+	float theta_a_raw=0;
+	float theta_g_raw = 0;
+	float last_theta_a_raw = 0;
+	float last_theta_g_raw = 0;
+	float last_theta_a = 0;
+	float last_theta_g = 0;
+	struct timeval c_time, last_time;
+	float dt = 0;
+	//float time_tot = 0;
+	float wc = .5;
+
 	rc_imu_data_t imu_data; // imu data struct init
-	rc_imu_config_t imu_conf = rc_default_imu_config();
-	imu_conf.enable_magnetometer=1;
+	rc_imu_config_t imu_conf = rc_default_imu_config(); //use default config
+	//init last time to current time
 	gettimeofday(&last_time, NULL);
+
+	//print thread function
+	void *print_info(){
+		while(rc_get_state()!=EXITING){
+			printf("theta_a: %.4f theta_g %.5f  theta_f %.5f\r" ,theta_a,theta_g,theta_f);
+			rc_usleep(100000);
+		}
+		return 0;
+	}
+
+	//comp filter interupt function
+	void comp_filter(){
+		//read imu data
+		if(rc_read_gyro_data(&imu_data)<0){
+			printf("read gyro failed\n");
+		}
+		if(rc_read_accel_data(&imu_data)<0){
+			printf("read accel failed\n");
+		}
+		//update current time
+		gettimeofday(&c_time, NULL);
+		//update dt with millisecond resolution
+		dt = (float)(c_time.tv_sec-last_time.tv_sec)+((c_time.tv_usec-last_time.tv_usec)/1000000.0);
+		//calculate angle from acceleration data
+		theta_a_raw = -atan2(imu_data.accel[2],imu_data.accel[1]);
+		//calculate rotation from start with gyro data
+		theta_g_raw = theta_g_raw + (float)dt*(imu_data.gyro[0]*DEG_TO_RAD) ;
+		//apply low pass filter on accelerometer
+		theta_a = (wc*dt*last_theta_a_raw)+((1-(wc*dt))*last_theta_a);
+		//apply high pass filter on theta_g_raw
+		theta_g = (1-(wc*dt))*last_theta_g + theta_g_raw - last_theta_g_raw;
+		//get theta f
+		theta_f = theta_a + theta_g;
+
+		//set last stuff
+		last_time = c_time;
+		last_theta_a = theta_a;
+		last_theta_g = theta_g;
+		last_theta_g_raw = theta_g_raw;
+		last_theta_a_raw = theta_a_raw;
+		//time_tot = time_tot + dt; //total time for data purposes
+		
+	}
 
 	//record data
 	//FILE *f = fopen("data.txt", "w");
+
 	//inititalize imu
 	if(rc_initialize_imu(&imu_data, imu_conf)){
 		fprintf(stderr,"rc_initialize_imu_failed\n");
@@ -77,12 +117,13 @@ int main(){
 		printf("dmp init failed");
 		return -1;
 	}
+	//set dmp interrupt fxn
 	rc_set_imu_interrupt_func(&comp_filter);
 
 	// done initializing so set state to RUNNING
 	rc_set_state(RUNNING); 
 
-	//make second thread
+	//make second print thread
 	pthread_t print_thread;
 	pthread_create(&print_thread,NULL,print_info,(void*) NULL);
 
@@ -93,31 +134,7 @@ int main(){
 			// Green = running
 			rc_set_led(GREEN, ON);
 			rc_set_led(RED, OFF);
-			//read imu data
-			if(rc_read_gyro_data(&imu_data)<0){
-				printf("read gyro failed\n");
-			}
-			if(rc_read_accel_data(&imu_data)<0){
-				printf("read accel failed\n");
-			}
-			gettimeofday(&c_time, NULL);
-			dt = (float)(c_time.tv_sec-last_time.tv_sec)+((c_time.tv_usec-last_time.tv_usec)/1000000.0);
-			if(dt>100){
-				dt = 0;
-			}
-			//calculate angle from acceleration data
-			theta_a_raw = -atan2(imu_data.accel[2],imu_data.accel[1]);
-			//calculate rotation from start with gyro data
-			theta_g_raw = theta_g_raw + (float)dt*(imu_data.gyro[0]*DEG_TO_RAD) ;
-			//get theta f
-			theta_f = theta_a + theta_g;
-			//set last stuff
-			last_time = c_time;
-			last_theta_a = theta_a;
-			last_theta_g = theta_g;
-			last_theta_g_raw = theta_g_raw;
-			last_theta_a_raw = theta_a_raw;
-			time_tot = time_tot + dt;
+			//printf("accel: %f    gyro: %f",imu_data.accel_to_ms2,imu_data.gyro_to_degs);
 			//printf("theta_a_raw: %.4f theta_a: %.4f theta_g_raw %.5f  theta_g %.5f  theta_f %.5f" , theta_a_raw,theta_a,theta_g_raw,theta_g,theta_f);
 		}
 		else if(rc_get_state()==PAUSED){
@@ -171,12 +188,3 @@ void on_pause_pressed(){
 	rc_set_state(EXITING);
 	return;
 }
-
-void comp_filter(){
-	//apply low pass filter on accelerometer
-	theta_a = (wc*dt*last_theta_a_raw)+((1-(wc*dt))*last_theta_a);
-	//apply high pass filter on theta_g_raw
-	theta_g = (1-(wc*dt))*last_theta_g + theta_g_raw - last_theta_g_raw;
-}
-
-
