@@ -11,7 +11,7 @@
 #define DT 0.01			// 1/sample_rate
 
 // Structural properties of eduMiP
-#define CAPE_MOUNT_ANGLE		-0.49 // increase if mip tends to roll forward
+#define CAPE_MOUNT_ANGLE		0.35 // increase if mip tends to roll forward
 #define GEARBOX 				35.577
 #define ENCODER_RES				60
 #define WHEEL_RADIUS_M			0.034
@@ -28,6 +28,19 @@
 #define ENCODER_CHANNEL_R		2
 #define ENCODER_POLARITY_L		1
 #define ENCODER_POLARITY_R		-1
+
+// // inner loop controller 100hz new
+#define 	D1_GAIN					1
+#define 	D1_NUM					{-3.211, 5.469, -2.327}
+#define 	D1_DEN					{ 1.000, -1.572, 0.5724}
+#define 	D1_SATURATION_TIMEOUT	0.4
+
+
+// outer loop controller new 100hz
+#define 	D2_GAIN					1
+#define 	D2_NUM					{0.1642,  -0.1562}
+#define 	D2_DEN					{1,  -0.6023}
+#define 	THETA_REF_MAX			0.33
 
 
 // Thread Loop Rates

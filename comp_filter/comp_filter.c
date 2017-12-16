@@ -51,15 +51,35 @@ int main(){
 	float last_theta_g_raw = 0;
 	float last_theta_a = 0;
 	float last_theta_g = 0;
-	struct timeval c_time, last_time;
 	float dt = 0;
-	//float time_tot = 0;
 	float wc = .5;
 
 	rc_imu_data_t imu_data; // imu data struct init
 	rc_imu_config_t imu_conf = rc_default_imu_config(); //use default config
-	//init last time to current time
-	gettimeofday(&last_time, NULL);
+
+	//comp filter interupt function
+	void comp_filter(){
+	//update current time
+	dt = .01;
+	//calculate angle from acceleration data
+	theta_a_raw = -atan2(imu_data.accel[2],imu_data.accel[1]);
+	//calculate rotation from start with gyro data
+	theta_g_raw = theta_g_raw + (float)dt*(imu_data.gyro[0]*DEG_TO_RAD) ;
+	//apply low pass filter on accelerometer
+	theta_a = (wc*dt*last_theta_a_raw)+((1-(wc*dt))*last_theta_a);
+	//apply high pass filter on theta_g_raw
+	theta_g = (1-(wc*dt))*last_theta_g + theta_g_raw - last_theta_g_raw;
+	//get theta f
+	theta_f = theta_a + theta_g;
+
+	//set last stuff
+	last_theta_a = theta_a;
+	last_theta_g = theta_g;
+	last_theta_g_raw = theta_g_raw;
+	last_theta_a_raw = theta_a_raw;
+	//time_tot = time_tot + dt; //total time for data purposes
+	
+}
 
 	//print thread function
 	void *print_info(){
@@ -70,39 +90,7 @@ int main(){
 		return 0;
 	}
 
-	//comp filter interupt function
-	void comp_filter(){
-		//read imu data
-		if(rc_read_gyro_data(&imu_data)<0){
-			printf("read gyro failed\n");
-		}
-		if(rc_read_accel_data(&imu_data)<0){
-			printf("read accel failed\n");
-		}
-		//update current time
-		gettimeofday(&c_time, NULL);
-		//update dt with millisecond resolution
-		dt = (float)(c_time.tv_sec-last_time.tv_sec)+((c_time.tv_usec-last_time.tv_usec)/1000000.0);
-		//calculate angle from acceleration data
-		theta_a_raw = -atan2(imu_data.accel[2],imu_data.accel[1]);
-		//calculate rotation from start with gyro data
-		theta_g_raw = theta_g_raw + (float)dt*(imu_data.gyro[0]*DEG_TO_RAD) ;
-		//apply low pass filter on accelerometer
-		theta_a = (wc*dt*last_theta_a_raw)+((1-(wc*dt))*last_theta_a);
-		//apply high pass filter on theta_g_raw
-		theta_g = (1-(wc*dt))*last_theta_g + theta_g_raw - last_theta_g_raw;
-		//get theta f
-		theta_f = theta_a + theta_g;
 
-		//set last stuff
-		last_time = c_time;
-		last_theta_a = theta_a;
-		last_theta_g = theta_g;
-		last_theta_g_raw = theta_g_raw;
-		last_theta_a_raw = theta_a_raw;
-		//time_tot = time_tot + dt; //total time for data purposes
-		
-	}
 
 	//record data
 	//FILE *f = fopen("data.txt", "w");
@@ -188,3 +176,5 @@ void on_pause_pressed(){
 	rc_set_state(EXITING);
 	return;
 }
+
+
