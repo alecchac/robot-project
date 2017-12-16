@@ -11,7 +11,7 @@
 #define DT 0.01			// 1/sample_rate
 
 // Structural properties of eduMiP
-#define CAPE_MOUNT_ANGLE		0.35 // increase if mip tends to roll forward
+#define CAPE_MOUNT_ANGLE		0.43 // increase if mip tends to roll forward
 #define GEARBOX 				35.577
 #define ENCODER_RES				60
 #define WHEEL_RADIUS_M			0.034

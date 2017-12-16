@@ -23,12 +23,12 @@ typedef struct core_state_t{
 	float theta;
 	float phi;
 	float vBatt;
-	float mot_comp; //motor compensation
 }core_state_t;
 
 //threads
 void* battery_checker(void* ptr);
 void* print_info(void* ptr);
+void* outer_loop(void* ptr);
 
 // function declarations
 void on_pause_pressed();
@@ -37,6 +37,7 @@ void comp_filter(float* theta_a,float* theta_g, float* theta_current);
 int disarm_controller();
 int arm_controller();
 int reset_inner_controller();
+int reset_outer_controller();
 int wait_for_starting_condition();
 
 //global variables 
@@ -52,6 +53,11 @@ static float last_e_theta_2=0;
 static float u = 0;
 static float last_u_1 = 0;
 static float last_u_2 = 0;
+static float last_e_phi = 0;
+static float last_theta_ref = 0;
+static float phi_current = 0;
+static float e_phi = 0;
+
 
 
 /*******************************************************************************
@@ -86,31 +92,35 @@ int main(){
 	//-----------Init Inner Loop Function for IMU interrupt at 100Hz---------
 	void inner_loop(){
 		comp_filter(&theta_a,&theta_g,&robot_info.theta);
-		//determine variables needed for calculation
-		e_theta = theta_ref-robot_info.theta;
-		//apply difference equation
-		float K = 1;
-		u = (K*-3.211*e_theta)+(K*5.469*last_e_theta_1)+(K*-2.327*last_e_theta_2)+(1.572*last_u_1)+(-.5724*last_u_2);
+		float K = 1*(V_NOMINAL/robot_info.vBatt);
+		float duty = 0;
 		if(arm_state == ARMED&&fabs(robot_info.theta)<TIP_ANGLE){
-			float duty = u*robot_info.mot_comp;
-			if(duty>=1){
-				duty = 1;
+			//determine variables needed for calculation
+			e_theta = theta_ref-robot_info.theta;
+			//apply difference equation
+			u = (K*-3.211*e_theta)+(K*5.469*last_e_theta_1)+(K*-2.327*last_e_theta_2)+(1.572*last_u_1)+(-.5724*last_u_2);
+			if(u>=1){
+				u = 1;
 				sat_counter = sat_counter + (1/100.0);//if motor is saturated, add to counter
+				reset_inner_controller();
 			}
-			if(duty<=-1){
-				duty = -1;
+			if(u<=-1){
+				u = -1;
 				sat_counter = sat_counter + (1/100.0);//if motor is saturated, add to counter
+				reset_inner_controller();
 			}
+			duty = u;
+			//Set Last e_theta and u values
+			last_e_theta_2 = last_e_theta_1;
+			last_e_theta_1 = e_theta;
+			last_u_2 = last_u_1;
+			last_u_1 = u;
 			rc_set_motor(MOTOR_CHANNEL_L, MOTOR_POLARITY_L * duty); 
 			rc_set_motor(MOTOR_CHANNEL_R, MOTOR_POLARITY_R * duty);
 			if(sat_counter>PICKUP_DETECTION_TIME){
 				arm_state=DISARMED;
 				disarm_controller();
 			}
-			last_e_theta_1 = e_theta;
-			last_e_theta_2 = last_e_theta_1;
-			last_u_1 = u;
-			last_u_2 = last_u_1;
 		}
 	}
 	//start battery thread
@@ -121,6 +131,10 @@ int main(){
 	pthread_create(&print_thread,NULL,print_info,(void*)NULL);
 
 	while(robot_info.vBatt ==0) rc_usleep(1000);
+
+	//init outer loop thread
+	pthread_t outer_loop_thread;
+	pthread_create(&outer_loop_thread,NULL,outer_loop,(void*)NULL);
 
 	//-------------------init imu stuff--------------------------------
 	//inititalize imu
@@ -161,7 +175,6 @@ int main(){
 			rc_set_led(GREEN, OFF);
 			rc_set_led(RED, ON);
 		}
-		printf("thetaf: %f      u: %f\r",robot_info.theta,u);
 		// always sleep at some point
 		rc_usleep(10000);
 	}
@@ -169,24 +182,31 @@ int main(){
 	// exit cleanly
 	pthread_join(battery_thread,NULL);
 	pthread_join(print_thread,NULL);
+	pthread_join(outer_loop_thread,NULL);
 	rc_power_off_imu();
 	rc_cleanup();
 	rc_disable_motors(); 
 	return 0;
 }
 
-void outer_loop(){
+void* outer_loop(void* ptr){
 	float phi_ref = 0;
 	while(rc_get_state()!=EXITING){
 		// handle other states
 		if(rc_get_state()==RUNNING){
-			float phi_current = (rc_get_encoder_pos(ENCODER_CHANNEL_R) * TWO_PI) \
-									/(ENCODER_POLARITY_R * GEARBOX * ENCODER_RES);
-			float e_phi = phi_ref-phi_current;
+			phi_current = -(rc_get_encoder_pos(ENCODER_CHANNEL_L) * TWO_PI) \
+									/(ENCODER_POLARITY_L * GEARBOX * ENCODER_RES);
+			e_phi = phi_ref-phi_current;
+			theta_ref = (0.1642*e_phi) + (-0.1562*last_e_phi)+(.6023*last_theta_ref);
+			//set last variables
+			last_theta_ref = theta_ref;
+			last_e_phi = e_phi;
 			rc_usleep(50000);
 		}
 	}
+	return NULL;
 }
+ 
 
 
 /*******************************************************************************
@@ -258,6 +278,7 @@ int disarm_controller(){
 
 int arm_controller(){
 	reset_inner_controller();
+	reset_outer_controller();
 	sat_counter =0;
 	rc_set_encoder_pos(ENCODER_CHANNEL_R,0);
 	rc_set_encoder_pos(ENCODER_CHANNEL_L,0);
@@ -273,7 +294,6 @@ void* battery_checker(void* ptr){
 		// if the value doesn't make sense, use nominal voltage
 		if (new_v>9.0 || new_v<5.0) new_v = V_NOMINAL;
 		robot_info.vBatt = new_v;
-		robot_info.mot_comp = V_NOMINAL/new_v;
 		rc_usleep(1000000 / BATTERY_CHECK_HZ);
 	}
 	return NULL;
@@ -286,6 +306,13 @@ int reset_inner_controller(){
 	last_u_1 = 0;
 	last_u_2 = 0;
 	u = 0;
+	return 0;
+}
+
+int reset_outer_controller(){
+	last_theta_ref = 0;
+	last_e_phi = 0;
+	e_phi = 0;
 	return 0;
 }
 
@@ -321,10 +348,10 @@ int wait_for_starting_condition(){
 	return -1;
 }
 
-void *print_info(void *ptr){
+void* print_info(void *ptr){
 	while(rc_get_state()!=EXITING){
-		printf("e0: %f  e1: %f  e2: %f  u0: %f  u1: %f  u2: %f\n" ,e_theta,last_e_theta_1,last_e_theta_2,u,last_u_1,last_u_2);
+		printf("theta: %f  u: %f  e: %f  sat_counter: %f theta_ref: %f phi_current %f\n" ,robot_info.theta,u,e_theta,sat_counter,theta_ref,phi_current);
 		rc_usleep(10000);
 	}
-	return 0;
+	return NULL;
 }
