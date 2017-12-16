@@ -45,13 +45,11 @@
 
 // Thread Loop Rates
 #define BATTERY_CHECK_HZ		5
-#define SETPOINT_MANAGER_HZ		100
-#define PRINTF_HZ				50
 
 // other
 #define TIP_ANGLE				0.85
-#define START_ANGLE				0.3
-#define START_DELAY				0.4
+#define START_ANGLE				0.1
+#define START_DELAY				1
 #define PICKUP_DETECTION_TIME	0.6
 #define ENABLE_POSITION_HOLD	1
 #define SOFT_START_SEC			0.7

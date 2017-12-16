@@ -77,6 +77,8 @@ int main(){
 	float theta_a=0;
 	float theta_g=0;
 	rc_imu_config_t imu_conf = rc_default_imu_config(); //use default config
+	imu_conf.dmp_sample_rate = SAMPLE_RATE_HZ;
+	imu_conf.orientation = ORIENTATION_Y_UP;
 
 
 	//----------------Done Init Variables---------------------------
@@ -87,18 +89,29 @@ int main(){
 		//determine variables needed for calculation
 		e_theta = theta_ref-robot_info.theta;
 		//apply difference equation
-		u = (-3.211*e_theta)+(5.469*last_e_theta_1)+(-2.327*last_e_theta_2)+(1.572*last_u_1)+(-.5724*last_u_2);
-		if(arm_state == ARMED){
+		float K = 1;
+		u = (K*-3.211*e_theta)+(K*5.469*last_e_theta_1)+(K*-2.327*last_e_theta_2)+(1.572*last_u_1)+(-.5724*last_u_2);
+		if(arm_state == ARMED&&fabs(robot_info.theta)<TIP_ANGLE){
 			float duty = u*robot_info.mot_comp;
+			if(duty>=1){
+				duty = 1;
+				sat_counter = sat_counter + (1/100.0);//if motor is saturated, add to counter
+			}
+			if(duty<=-1){
+				duty = -1;
+				sat_counter = sat_counter + (1/100.0);//if motor is saturated, add to counter
+			}
 			rc_set_motor(MOTOR_CHANNEL_L, MOTOR_POLARITY_L * duty); 
 			rc_set_motor(MOTOR_CHANNEL_R, MOTOR_POLARITY_R * duty);
-			if(duty>1)sat_counter = sat_counter + (1/100);//if motor is saturated, add to counter
-			if(sat_counter>PICKUP_DETECTION_TIME)arm_state=DISARMED;
+			if(sat_counter>PICKUP_DETECTION_TIME){
+				arm_state=DISARMED;
+				disarm_controller();
+			}
+			last_e_theta_1 = e_theta;
+			last_e_theta_2 = last_e_theta_1;
+			last_u_1 = u;
+			last_u_2 = last_u_1;
 		}
-		last_e_theta_1 = e_theta;
-		last_e_theta_2 = last_e_theta_1;
-		last_u_1 = u;
-		last_u_2 = last_u_1;
 	}
 	//start battery thread
 	pthread_t battery_thread;
@@ -126,7 +139,6 @@ int main(){
 
 	// done initializing so set state to RUNNING
 	rc_set_state(RUNNING); 
-
 	// Keep looping until state changes to EXITING
 	while(rc_get_state()!=EXITING){
 		// handle other states
@@ -213,7 +225,7 @@ void on_pause_pressed(){
 void comp_filter(float* theta_a,float* theta_g, float* theta_current){
 	//define variables
 	float dt = .01;
-	float wc = .5;
+	float wc = .75;
 	float theta_a_raw=0;
 	float theta_g_raw = 0;
 	static float last_theta_a_raw = 0;
@@ -311,8 +323,8 @@ int wait_for_starting_condition(){
 
 void *print_info(void *ptr){
 	while(rc_get_state()!=EXITING){
-		printf("u: %f  theta: %f  arm_state: %d\r" ,u,robot_info.theta,arm_state);
-		rc_usleep(100000);
+		printf("e0: %f  e1: %f  e2: %f  u0: %f  u1: %f  u2: %f\n" ,e_theta,last_e_theta_1,last_e_theta_2,u,last_u_1,last_u_2);
+		rc_usleep(10000);
 	}
 	return 0;
 }
