@@ -92,9 +92,9 @@ int main(){
 	//-----------Init Inner Loop Function for IMU interrupt at 100Hz---------
 	void inner_loop(){
 		comp_filter(&theta_a,&theta_g,&robot_info.theta);
-		float K = 1*(V_NOMINAL/robot_info.vBatt);
+		float K = .8*(V_NOMINAL/robot_info.vBatt);
 		float duty = 0;
-		if(arm_state == ARMED&&fabs(robot_info.theta)<TIP_ANGLE){
+		if(arm_state == ARMED){
 			//determine variables needed for calculation
 			e_theta = theta_ref-robot_info.theta;
 			//apply difference equation
@@ -121,6 +121,11 @@ int main(){
 				arm_state=DISARMED;
 				disarm_controller();
 			}
+			if(fabs(robot_info.theta)<TIP_ANGLE){
+				arm_state=DISARMED;
+				disarm_controller();
+			}
+			
 		}
 	}
 	//start battery thread
@@ -194,8 +199,11 @@ void* outer_loop(void* ptr){
 	while(rc_get_state()!=EXITING){
 		// handle other states
 		if(rc_get_state()==RUNNING){
-			phi_current = -(rc_get_encoder_pos(ENCODER_CHANNEL_L) * TWO_PI) \
-									/(ENCODER_POLARITY_L * GEARBOX * ENCODER_RES);
+			float wheelAngleR = (rc_get_encoder_pos(ENCODER_CHANNEL_R) * TWO_PI) \
+								/(ENCODER_POLARITY_R * GEARBOX * ENCODER_RES);
+			float wheelAngleL = (rc_get_encoder_pos(ENCODER_CHANNEL_L) * TWO_PI) \
+								/(ENCODER_POLARITY_L * GEARBOX * ENCODER_RES);
+			phi_current = -((wheelAngleL+wheelAngleR)/2) + robot_info.theta;
 			e_phi = phi_ref-phi_current;
 			theta_ref = (0.1642*e_phi) + (-0.1562*last_e_phi)+(.6023*last_theta_ref);
 			//set last variables
