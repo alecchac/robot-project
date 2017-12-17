@@ -36,12 +36,13 @@ void on_pause_released();
 void comp_filter(float* theta_a,float* theta_g, float* theta_current);
 int disarm_controller();
 int arm_controller();
-int reset_inner_controller();
-int reset_outer_controller();
+int reset_values();
 int wait_for_starting_condition();
 
 //global variables 
-static float theta_ref = 0;
+static float theta_a=0.0f;
+static float theta_g=0.0f;
+static float theta_ref = 0.0f;
 static float sat_counter =0;
 static arm_state_t arm_state;
 rc_imu_data_t imu_data; // imu data struct init
@@ -85,8 +86,6 @@ int main(){
 	rc_alloc_ringbuf(&e_buf,3);
 	rc_alloc_ringbuf(&u_buf,2);
 	arm_state = DISARMED;
-	float theta_a=0;
-	float theta_g=0;
 	rc_imu_config_t imu_conf = rc_default_imu_config(); //use default config
 	imu_conf.dmp_sample_rate = SAMPLE_RATE_HZ;
 	imu_conf.orientation = ORIENTATION_Y_UP;
@@ -96,9 +95,10 @@ int main(){
 	
 	//-----------Init Inner Loop Function for IMU interrupt at 100Hz---------
 	void inner_loop(){
-		comp_filter(&theta_a,&theta_g,&robot_info.theta);
-		float K =1.07*(V_NOMINAL/robot_info.vBatt);
-		float saturation_limit = .7;
+		//comp_filter(&theta_a,&theta_g,&robot_info.theta);
+		robot_info.theta = imu_data.dmp_TaitBryan[TB_PITCH_X] + CAPE_MOUNT_ANGLE; 
+		float K =1.08*(V_NOMINAL/robot_info.vBatt);
+		float saturation_limit = .9;
 		float D1_num[] = D1_NUM;
 		float D1_den[] = D1_DEN;
 		if(arm_state == ARMED){
@@ -138,8 +138,8 @@ int main(){
 	while(robot_info.vBatt ==0) rc_usleep(1000);
 
 	//init outer loop thread
-	pthread_t outer_loop_thread;
-	pthread_create(&outer_loop_thread,NULL,outer_loop,(void*)NULL);
+	//pthread_t outer_loop_thread;
+	//pthread_create(&outer_loop_thread,NULL,outer_loop,(void*)NULL);
 
 	//-------------------init imu stuff--------------------------------
 	//inititalize imu
@@ -187,7 +187,7 @@ int main(){
 	// exit cleanly
 	pthread_join(battery_thread,NULL);
 	pthread_join(print_thread,NULL);
-	pthread_join(outer_loop_thread,NULL);
+	//pthread_join(outer_loop_thread,NULL);
 	rc_power_off_imu();
 	rc_cleanup();
 	rc_disable_motors(); 
@@ -195,7 +195,7 @@ int main(){
 }
 
 void* outer_loop(void* ptr){
-	float phi_ref = 0;
+	float phi_ref = 0.0f;
 	float D2_num[] = D2_NUM;
 	float D2_den[] = D2_DEN;
 	while(rc_get_state()!=EXITING){
@@ -207,7 +207,7 @@ void* outer_loop(void* ptr){
 								/(ENCODER_POLARITY_L * GEARBOX * ENCODER_RES);
 			phi_current = -((wheelAngleL+wheelAngleR)/2) + robot_info.theta;
 			e_phi = phi_ref-phi_current;
-			theta_ref = D2_P*((D2_num[0]*e_phi) + (D2_num[1]*last_e_phi)+(-D2_den[1]*last_theta_ref));
+			theta_ref = ((D2_num[0]*e_phi) + (D2_num[1]*last_e_phi)-(D2_den[1]*last_theta_ref));
 			//set last variables
 			last_theta_ref = theta_ref;
 			last_e_phi = e_phi;
@@ -288,9 +288,7 @@ int disarm_controller(){
 
 int arm_controller(){
 	soft_start = 0;
-	reset_inner_controller();
-	reset_outer_controller();
-	sat_counter =0;
+	reset_values();
 	rc_set_encoder_pos(ENCODER_CHANNEL_R,0);
 	rc_set_encoder_pos(ENCODER_CHANNEL_L,0);
 	arm_state = ARMED;
@@ -311,23 +309,23 @@ void* battery_checker(void* ptr){
 }
 
 // make a function to reset controller when armed
-int reset_inner_controller(){
+int reset_values(){
 	rc_reset_ringbuf(&e_buf);
 	rc_reset_ringbuf(&u_buf);
-	last_e_theta_1 = 0;
-	last_e_theta_2 = 0;
-	last_u_1 = 0;
-	last_u_2 = 0;
-	u = 0;
+	last_e_theta_1 = 0.0f;
+	last_e_theta_2 = 0.0f;
+	last_u_1 = 0.0f;
+	last_u_2 = 0.0f;
+	u = 0.0f;
+	theta_ref = 0.0f;
+	sat_counter =0.0f;
+	e_theta = 0.0f;
+	phi_current = 0.0f;
+	last_theta_ref = 0.0f;
+	last_e_phi = 0.0f;
 	return 0;
 }
 
-int reset_outer_controller(){
-	last_theta_ref = 0;
-	last_e_phi = 0;
-	e_phi = 0;
-	return 0;
-}
 
 int wait_for_starting_condition(){
 	int checks = 0;
