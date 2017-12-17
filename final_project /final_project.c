@@ -138,8 +138,8 @@ int main(){
 	while(robot_info.vBatt ==0) rc_usleep(1000);
 
 	//init outer loop thread
-	//pthread_t outer_loop_thread;
-	//pthread_create(&outer_loop_thread,NULL,outer_loop,(void*)NULL);
+	pthread_t outer_loop_thread;
+	pthread_create(&outer_loop_thread,NULL,outer_loop,(void*)NULL);
 
 	//-------------------init imu stuff--------------------------------
 	//inititalize imu
@@ -187,7 +187,7 @@ int main(){
 	// exit cleanly
 	pthread_join(battery_thread,NULL);
 	pthread_join(print_thread,NULL);
-	//pthread_join(outer_loop_thread,NULL);
+	pthread_join(outer_loop_thread,NULL);
 	rc_power_off_imu();
 	rc_cleanup();
 	rc_disable_motors(); 
@@ -205,9 +205,9 @@ void* outer_loop(void* ptr){
 								/(ENCODER_POLARITY_R * GEARBOX * ENCODER_RES);
 			float wheelAngleL = (rc_get_encoder_pos(ENCODER_CHANNEL_L) * TWO_PI) \
 								/(ENCODER_POLARITY_L * GEARBOX * ENCODER_RES);
-			phi_current = -((wheelAngleL+wheelAngleR)/2) + robot_info.theta;
+			phi_current = (wheelAngleR) + robot_info.theta;
 			e_phi = phi_ref-phi_current;
-			theta_ref = ((D2_num[0]*e_phi) + (D2_num[1]*last_e_phi)-(D2_den[1]*last_theta_ref));
+			theta_ref = D2_P*((D2_num[0]*e_phi) + (D2_num[1]*last_e_phi)-(D2_den[1]*last_theta_ref));
 			//set last variables
 			last_theta_ref = theta_ref;
 			last_e_phi = e_phi;

@@ -12,7 +12,7 @@
 #define FILTER_WC 2
 
 // Structural properties of eduMiP
-#define CAPE_MOUNT_ANGLE		0.33 // increase if mip tends to roll forward
+#define CAPE_MOUNT_ANGLE		0.32 // increase if mip tends to roll forward
 #define GEARBOX 				35.577
 #define ENCODER_RES				60
 #define WHEEL_RADIUS_M			0.034
@@ -58,8 +58,8 @@
 #define 	D2_GAIN					1
 #define 	D2_NUM					{0.2176,  -0.2059}
 #define 	D2_DEN					{1,  -0.5685}
-#define 	THETA_REF_MAX			0.33
-#define     D2_P                       0.68
+#define 	THETA_REF_MAX			0.68
+#define     D2_P                       0.4
 
 
 // Thread Loop Rates
