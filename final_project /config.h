@@ -38,28 +38,26 @@
 #define 	D1_NUM					{-3.211, 5.469, -2.327}
 #define 	D1_DEN					{ 1.000, -1.572, 0.5724}
 #define 	D1_SATURATION_TIMEOUT	.4
-*/
-
-/*
-// // inner loop controller 100hz new
-#define 	D1_GAIN					1
-#define 	D1_NUM					{-4.945, 8.862, -3.967}
-#define 	D1_DEN					{ 1.000, -1.481, 0.4812}
-#define 	D1_SATURATION_TIMEOUT	0.4
-*/
-
-// // inner loop controller 100hz new
-#define 	D1_GAIN					1
-#define 	D1_NUM					{-4.789,8.095, -3.367}
-#define 	D1_DEN					{ 1.000, -1.25, 0.25}
-#define 	D1_SATURATION_TIMEOUT	.4
 
 // outer loop controller new 100hz
 #define 	D2_GAIN					1
 #define 	D2_NUM					{0.2176,  -0.2059}
 #define 	D2_DEN					{1,  -0.5685}
-#define 	THETA_REF_MAX			0.68
-#define     D2_P                       0.4
+#define     D2_P                       0.8333
+*/
+
+// // inner loop controller 100hz new
+#define 	D1_GAIN					1
+#define 	D1_NUM					{-4.945, 8.862, -3.967}
+#define 	D1_DEN					{ 1.000, -1.481, 0.4812}
+#define 	D1_SATURATION_TIMEOUT	0.4
+
+
+// outer loop controller new 100hz
+#define 	D2_GAIN					1
+#define 	D2_NUM					{0.2176,  -0.2059}
+#define 	D2_DEN					{1,  -0.5685}
+#define     D2_P                       0.68
 
 
 // Thread Loop Rates
