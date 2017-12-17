@@ -47,6 +47,8 @@ static arm_state_t arm_state;
 rc_imu_data_t imu_data; // imu data struct init
 core_state_t robot_info;
 // loop variables
+rc_ringbuf_t e_buf;
+rc_ringbuf_t u_buf;
 static float e_theta = 0;
 static float last_e_theta_1=0;
 static float last_e_theta_2=0;
@@ -57,6 +59,7 @@ static float last_e_phi = 0;
 static float last_theta_ref = 0;
 static float phi_current = 0;
 static float e_phi = 0;
+static float soft_start = 0;
 
 
 
@@ -79,6 +82,8 @@ int main(){
 	rc_set_pause_pressed_func(&on_pause_pressed);
 	rc_set_pause_released_func(&on_pause_released);
 	//init variables
+	rc_alloc_ringbuf(&e_buf,3);
+	rc_alloc_ringbuf(&u_buf,2);
 	arm_state = DISARMED;
 	float theta_a=0;
 	float theta_g=0;
@@ -92,36 +97,31 @@ int main(){
 	//-----------Init Inner Loop Function for IMU interrupt at 100Hz---------
 	void inner_loop(){
 		comp_filter(&theta_a,&theta_g,&robot_info.theta);
-		float K = .8*(V_NOMINAL/robot_info.vBatt);
-		float duty = 0;
+		float K =1.07*(V_NOMINAL/robot_info.vBatt);
+		float saturation_limit = .7;
+		float D1_num[] = D1_NUM;
+		float D1_den[] = D1_DEN;
 		if(arm_state == ARMED){
-			//determine variables needed for calculation
-			e_theta = theta_ref-robot_info.theta;
-			//apply difference equation
-			u = (K*-3.211*e_theta)+(K*5.469*last_e_theta_1)+(K*-2.327*last_e_theta_2)+(1.572*last_u_1)+(-.5724*last_u_2);
-			if(u>=1){
-				u = 1;
-				sat_counter = sat_counter + (1/100.0);//if motor is saturated, add to counter
-				reset_inner_controller();
+			e_theta = theta_ref - robot_info.theta;
+			rc_insert_new_ringbuf_value(&e_buf,e_theta);
+			last_e_theta_1 = rc_get_ringbuf_value(&e_buf,1);
+			last_e_theta_2 = rc_get_ringbuf_value(&e_buf,2);
+			last_u_1 = rc_get_ringbuf_value(&u_buf,0);
+			last_u_2 = rc_get_ringbuf_value(&u_buf,1);
+			u = K*((D1_num[0]*e_theta)+(D1_num[1]*last_e_theta_1)+(D1_num[2]*last_e_theta_2)-(D1_den[1]*last_u_1)\
+				-(D1_den[2]*last_u_2));
+			rc_insert_new_ringbuf_value(&u_buf,u);
+			rc_set_motor(MOTOR_CHANNEL_L, MOTOR_POLARITY_L * u); 
+			rc_set_motor(MOTOR_CHANNEL_R, MOTOR_POLARITY_R * u);
+			if (u>=saturation_limit){
+				u = saturation_limit;
+				sat_counter += .01;
 			}
-			if(u<=-1){
-				u = -1;
-				sat_counter = sat_counter + (1/100.0);//if motor is saturated, add to counter
-				reset_inner_controller();
+			if (u<=-saturation_limit){
+				u = -saturation_limit;
+				sat_counter += .01;
 			}
-			duty = u;
-			//Set Last e_theta and u values
-			last_e_theta_2 = last_e_theta_1;
-			last_e_theta_1 = e_theta;
-			last_u_2 = last_u_1;
-			last_u_1 = u;
-			rc_set_motor(MOTOR_CHANNEL_L, MOTOR_POLARITY_L * duty); 
-			rc_set_motor(MOTOR_CHANNEL_R, MOTOR_POLARITY_R * duty);
-			if(sat_counter>PICKUP_DETECTION_TIME){
-				arm_state=DISARMED;
-				disarm_controller();
-			}
-			if(fabs(robot_info.theta)<TIP_ANGLE){
+			if(sat_counter>D1_SATURATION_TIMEOUT){
 				arm_state=DISARMED;
 				disarm_controller();
 			}
@@ -196,6 +196,8 @@ int main(){
 
 void* outer_loop(void* ptr){
 	float phi_ref = 0;
+	float D2_num[] = D2_NUM;
+	float D2_den[] = D2_DEN;
 	while(rc_get_state()!=EXITING){
 		// handle other states
 		if(rc_get_state()==RUNNING){
@@ -205,7 +207,7 @@ void* outer_loop(void* ptr){
 								/(ENCODER_POLARITY_L * GEARBOX * ENCODER_RES);
 			phi_current = -((wheelAngleL+wheelAngleR)/2) + robot_info.theta;
 			e_phi = phi_ref-phi_current;
-			theta_ref = (0.1642*e_phi) + (-0.1562*last_e_phi)+(.6023*last_theta_ref);
+			theta_ref = D2_P*((D2_num[0]*e_phi) + (D2_num[1]*last_e_phi)+(-D2_den[1]*last_theta_ref));
 			//set last variables
 			last_theta_ref = theta_ref;
 			last_e_phi = e_phi;
@@ -253,7 +255,7 @@ void on_pause_pressed(){
 void comp_filter(float* theta_a,float* theta_g, float* theta_current){
 	//define variables
 	float dt = .01;
-	float wc = .75;
+	float wc = FILTER_WC;
 	float theta_a_raw=0;
 	float theta_g_raw = 0;
 	static float last_theta_a_raw = 0;
@@ -285,6 +287,7 @@ int disarm_controller(){
 }
 
 int arm_controller(){
+	soft_start = 0;
 	reset_inner_controller();
 	reset_outer_controller();
 	sat_counter =0;
@@ -309,6 +312,8 @@ void* battery_checker(void* ptr){
 
 // make a function to reset controller when armed
 int reset_inner_controller(){
+	rc_reset_ringbuf(&e_buf);
+	rc_reset_ringbuf(&u_buf);
 	last_e_theta_1 = 0;
 	last_e_theta_2 = 0;
 	last_u_1 = 0;
@@ -358,7 +363,7 @@ int wait_for_starting_condition(){
 
 void* print_info(void *ptr){
 	while(rc_get_state()!=EXITING){
-		printf("theta: %f  u: %f  e: %f  sat_counter: %f theta_ref: %f phi_current %f\n" ,robot_info.theta,u,e_theta,sat_counter,theta_ref,phi_current);
+		printf("u: %f  theta_ref: %f  theta: %f  e_phi: %f Vbatt: %f \n" ,u,theta_ref,robot_info.theta,e_phi,robot_info.vBatt);
 		rc_usleep(10000);
 	}
 	return NULL;
