@@ -97,7 +97,7 @@ int main(){
 		//run Complementary filter to obtain body angle and put in the robot_info holder
 		comp_filter(&theta_a,&theta_g,&robot_info.theta);
 		//Set the gain for the inner loop by scaling battery voltage
-		float K =1.03*(V_NOMINAL/robot_info.vBatt);
+		float K =1.01*(V_NOMINAL/robot_info.vBatt);
 		//Set the Saturation Limit of the motors
 		float saturation_limit = .9;
 		//Get the Difference Equation coefficients
@@ -131,7 +131,8 @@ int main(){
 				u = -saturation_limit;
 				sat_counter += .01;
 			}
-			if(sat_counter>D1_SATURATION_TIMEOUT){
+			//If Saturated and It has gone farther than tip angle, Disarm 
+			if(sat_counter>D1_SATURATION_TIMEOUT || fabs(robot_info.theta)>TIP_ANGLE){
 				arm_state=DISARMED;
 				disarm_controller();
 			}

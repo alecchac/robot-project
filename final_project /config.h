@@ -46,7 +46,7 @@
 
 // // inner loop controller 100hz new
 #define 	D1_GAIN					1
-#define 	D1_NUM					{-4.945, 8.862, -3.967}
+#define 	D1_NUM					{-4.789, 8.095, -3.367}
 #define 	D1_DEN					{ 1.000, -1.481, 0.4812}
 #define 	D1_SATURATION_TIMEOUT	0.4
 
