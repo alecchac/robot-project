@@ -1,8 +1,8 @@
 /*******************************************************************************
-* rc_project_template.c
+*MIP Balancing Project
 *
-* This is meant to be a skeleton program for robotics cape projects. 
-* Change this description and file name 
+*Alec Chac
+*A12119602
 *******************************************************************************/
 
 // usefulincludes is a collection of common system includes for the lazy
@@ -18,6 +18,7 @@ typedef enum arm_state_t{
 	DISARMED
 }arm_state_t;
 
+//define core state to determine state of the robot
 typedef struct core_state_t{
 	float wheelAngle;
 	float theta;
@@ -25,12 +26,12 @@ typedef struct core_state_t{
 	float vBatt;
 }core_state_t;
 
-//threads
+//---------------------Initialize Functions------------------------
+//initialize threads
 void* battery_checker(void* ptr);
 void* print_info(void* ptr);
 void* outer_loop(void* ptr);
-
-// function declarations
+//other functions
 void on_pause_pressed();
 void on_pause_released();
 void comp_filter(float* theta_a,float* theta_g, float* theta_current);
@@ -39,9 +40,7 @@ int arm_controller();
 int reset_values();
 int wait_for_starting_condition();
 
-//global variables 
-static float theta_a=0.0f;
-static float theta_g=0.0f;
+//-------------------global variables------------------- 
 static float theta_ref = 0.0f;
 static float sat_counter =0;
 static arm_state_t arm_state;
@@ -50,15 +49,9 @@ core_state_t robot_info;
 // loop variables
 rc_ringbuf_t e_buf;
 rc_ringbuf_t u_buf;
-static float e_theta = 0;
-static float last_e_theta_1=0;
-static float last_e_theta_2=0;
 static float u = 0;
-static float last_u_1 = 0;
-static float last_u_2 = 0;
 static float last_e_phi = 0;
 static float last_theta_ref = 0;
-static float phi_current = 0;
 static float e_phi = 0;
 static float soft_start = 0;
 
@@ -83,9 +76,14 @@ int main(){
 	rc_set_pause_pressed_func(&on_pause_pressed);
 	rc_set_pause_released_func(&on_pause_released);
 	//init variables
+	float theta_a=0.0f;//comp filter
+	float theta_g=0.0f;//comp filter
+	//allocate space for ring buffers
 	rc_alloc_ringbuf(&e_buf,3);
 	rc_alloc_ringbuf(&u_buf,2);
+	//Make Sure that controller is disarmed
 	arm_state = DISARMED;
+	//initialize imu variables
 	rc_imu_config_t imu_conf = rc_default_imu_config(); //use default config
 	imu_conf.dmp_sample_rate = SAMPLE_RATE_HZ;
 	imu_conf.orientation = ORIENTATION_Y_UP;
@@ -94,25 +92,37 @@ int main(){
 	//----------------Done Init Variables---------------------------
 	
 	//-----------Init Inner Loop Function for IMU interrupt at 100Hz---------
+	//------------------------------------------------------------------------
 	void inner_loop(){
-		//comp_filter(&theta_a,&theta_g,&robot_info.theta);
-		robot_info.theta = imu_data.dmp_TaitBryan[TB_PITCH_X] + CAPE_MOUNT_ANGLE; 
+		//run Complementary filter to obtain body angle and put in the robot_info holder
+		comp_filter(&theta_a,&theta_g,&robot_info.theta);
+		//Set the gain for the inner loop by scaling battery voltage
 		float K =1.08*(V_NOMINAL/robot_info.vBatt);
+		//Set the Saturation Limit of the motors
 		float saturation_limit = .9;
+		//Get the Difference Equation coefficients
 		float D1_num[] = D1_NUM;
 		float D1_den[] = D1_DEN;
+
+		// -----------If armed, run INNER LOOP controller ---------
 		if(arm_state == ARMED){
-			e_theta = theta_ref - robot_info.theta;
-			rc_insert_new_ringbuf_value(&e_buf,e_theta);
-			last_e_theta_1 = rc_get_ringbuf_value(&e_buf,1);
-			last_e_theta_2 = rc_get_ringbuf_value(&e_buf,2);
-			last_u_1 = rc_get_ringbuf_value(&u_buf,0);
-			last_u_2 = rc_get_ringbuf_value(&u_buf,1);
-			u = K*((D1_num[0]*e_theta)+(D1_num[1]*last_e_theta_1)+(D1_num[2]*last_e_theta_2)-(D1_den[1]*last_u_1)\
-				-(D1_den[2]*last_u_2));
+			//Get the New Input
+			rc_insert_new_ringbuf_value(&e_buf,theta_ref - robot_info.theta);
+			//Calculate Difference Equation
+			u = K*soft_start\
+				*((D1_num[0]*rc_get_ringbuf_value(&e_buf,0))\
+				+(D1_num[1]*rc_get_ringbuf_value(&e_buf,1))\
+				+(D1_num[2]*rc_get_ringbuf_value(&e_buf,2))\
+				-(D1_den[1]*rc_get_ringbuf_value(&u_buf,0))\
+				-(D1_den[2]*rc_get_ringbuf_value(&u_buf,1)));
 			rc_insert_new_ringbuf_value(&u_buf,u);
+			//Drive the motors with the u as the duty cycle
 			rc_set_motor(MOTOR_CHANNEL_L, MOTOR_POLARITY_L * u); 
 			rc_set_motor(MOTOR_CHANNEL_R, MOTOR_POLARITY_R * u);
+			//Soft Start to ensure smooth initial operation
+			if(soft_start<1)soft_start+=.1;
+			if(soft_start>=1)soft_start = 1;
+			//Saturation Limiters to shut off in case of motor saturation
 			if (u>=saturation_limit){
 				u = saturation_limit;
 				sat_counter += .01;
@@ -128,21 +138,22 @@ int main(){
 			
 		}
 	}
+
+	//--------------------------Start Threads ------------------------
 	//start battery thread
 	pthread_t battery_thread;
 	pthread_create(&battery_thread,NULL,battery_checker,(void*)NULL);
 	//start print thread
 	pthread_t print_thread;
 	pthread_create(&print_thread,NULL,print_info,(void*)NULL);
-
+	//Wait until Battery Thread has started
 	while(robot_info.vBatt ==0) rc_usleep(1000);
-
 	//init outer loop thread
 	pthread_t outer_loop_thread;
 	pthread_create(&outer_loop_thread,NULL,outer_loop,(void*)NULL);
 
-	//-------------------init imu stuff--------------------------------
-	//inititalize imu
+	//-------------------Initialize IMU--------------------------------
+
 	if(rc_initialize_imu(&imu_data, imu_conf)){
 		fprintf(stderr,"rc_initialize_imu_failed\n");
 		return -1;
@@ -155,9 +166,10 @@ int main(){
 	//set dmp interrupt fxn
 	rc_set_imu_interrupt_func(&inner_loop);
 
-
 	// done initializing so set state to RUNNING
 	rc_set_state(RUNNING); 
+
+	//-----------------Run Main Loop--------------------
 	// Keep looping until state changes to EXITING
 	while(rc_get_state()!=EXITING){
 		// handle other states
@@ -194,23 +206,30 @@ int main(){
 	return 0;
 }
 
+//------------OUTER LOOP AT 10HZ --------------------------
+//---------------------------------------------------------
 void* outer_loop(void* ptr){
+	//set reference phi to zero
 	float phi_ref = 0.0f;
+	//get D2 coefficients
 	float D2_num[] = D2_NUM;
 	float D2_den[] = D2_DEN;
 	while(rc_get_state()!=EXITING){
-		// handle other states
-		if(rc_get_state()==RUNNING){
-			float wheelAngleR = (rc_get_encoder_pos(ENCODER_CHANNEL_R) * TWO_PI) \
+		// IF RUNNING AND ARMED 
+		if(rc_get_state()==RUNNING  &&  arm_state == ARMED){
+			//Get the wheel angle
+			robot_info.wheelAngle = (rc_get_encoder_pos(ENCODER_CHANNEL_R) * TWO_PI) \
 								/(ENCODER_POLARITY_R * GEARBOX * ENCODER_RES);
-			float wheelAngleL = (rc_get_encoder_pos(ENCODER_CHANNEL_L) * TWO_PI) \
-								/(ENCODER_POLARITY_L * GEARBOX * ENCODER_RES);
-			phi_current = (wheelAngleR) + robot_info.theta;
-			e_phi = phi_ref-phi_current;
+			//Determine the Phi by adding the body angle
+			robot_info.phi = (robot_info.wheelAngle) + robot_info.theta;
+			//get the error
+			e_phi = phi_ref-robot_info.phi;
+			//Calculate the Difference Equation
 			theta_ref = D2_P*((D2_num[0]*e_phi) + (D2_num[1]*last_e_phi)-(D2_den[1]*last_theta_ref));
 			//set last variables
 			last_theta_ref = theta_ref;
 			last_e_phi = e_phi;
+			//Sleep at 10Hz
 			rc_usleep(50000);
 		}
 	}
@@ -252,25 +271,28 @@ void on_pause_pressed(){
 	return;
 }
 
+
+//----------------------Comp Filter---------------------------------
+//----Determines the Body Angle of the MIP using a low pass and high pass filter--
 void comp_filter(float* theta_a,float* theta_g, float* theta_current){
 	//define variables
 	float dt = .01;
 	float wc = FILTER_WC;
 	float theta_a_raw=0;
-	float theta_g_raw = 0;
+	static float theta_g_raw = 0;
 	static float last_theta_a_raw = 0;
 	static float last_theta_g_raw = 0;
 	static float last_theta_a = 0;
 	static float last_theta_g = 0;
 	//calculate angle from acceleration data
-	theta_a_raw = -atan2(imu_data.accel[2],imu_data.accel[1]);
+	theta_a_raw = atan2(-imu_data.accel[2],imu_data.accel[1]);
 	//calculate rotation from start with gyro data
 	theta_g_raw = theta_g_raw + (float)dt*(imu_data.gyro[0]*DEG_TO_RAD) ;
 	//apply low pass filter on accelerometer
 	*theta_a = (wc*dt*last_theta_a_raw)+((1-(wc*dt))*last_theta_a);
 	//apply high pass filter on theta_g_raw
 	*theta_g = (1-(wc*dt))*last_theta_g + theta_g_raw - last_theta_g_raw;
-	//get theta f
+	//get theta 
 	*theta_current = *theta_a + *theta_g + CAPE_MOUNT_ANGLE;
 
 	//set last stuff
@@ -308,19 +330,13 @@ void* battery_checker(void* ptr){
 	return NULL;
 }
 
-// make a function to reset controller when armed
+// make a function to reset controllers when armed
 int reset_values(){
 	rc_reset_ringbuf(&e_buf);
 	rc_reset_ringbuf(&u_buf);
-	last_e_theta_1 = 0.0f;
-	last_e_theta_2 = 0.0f;
-	last_u_1 = 0.0f;
-	last_u_2 = 0.0f;
 	u = 0.0f;
 	theta_ref = 0.0f;
 	sat_counter =0.0f;
-	e_theta = 0.0f;
-	phi_current = 0.0f;
 	last_theta_ref = 0.0f;
 	last_e_phi = 0.0f;
 	return 0;
@@ -361,7 +377,7 @@ int wait_for_starting_condition(){
 
 void* print_info(void *ptr){
 	while(rc_get_state()!=EXITING){
-		printf("u: %f  theta_ref: %f  theta: %f  e_phi: %f Vbatt: %f \n" ,u,theta_ref,robot_info.theta,e_phi,robot_info.vBatt);
+		printf("u: %f  theta_ref: %f  theta: %f  e_phi: %f Vbatt: %f \r" ,u,theta_ref,robot_info.theta,e_phi,robot_info.vBatt);
 		rc_usleep(10000);
 	}
 	return NULL;

@@ -52,7 +52,7 @@ int main(){
 	float last_theta_a = 0;
 	float last_theta_g = 0;
 	float dt = 0;
-	float wc = .5;
+	float wc = .35;
 
 	rc_imu_data_t imu_data; // imu data struct init
 	rc_imu_config_t imu_conf = rc_default_imu_config(); //use default config
@@ -62,7 +62,7 @@ int main(){
 	//update current time
 	dt = .01;
 	//calculate angle from acceleration data
-	theta_a_raw = -atan2(imu_data.accel[2],imu_data.accel[1]);
+	theta_a_raw = atan2(-imu_data.accel[2],imu_data.accel[1]);
 	//calculate rotation from start with gyro data
 	theta_g_raw = theta_g_raw + (float)dt*(imu_data.gyro[0]*DEG_TO_RAD) ;
 	//apply low pass filter on accelerometer
@@ -77,23 +77,18 @@ int main(){
 	last_theta_g = theta_g;
 	last_theta_g_raw = theta_g_raw;
 	last_theta_a_raw = theta_a_raw;
-	//time_tot = time_tot + dt; //total time for data purposes
-	
 }
 
 	//print thread function
 	void *print_info(){
 		while(rc_get_state()!=EXITING){
 			printf("theta_a: %.4f theta_g %.5f  theta_f %.5f\r" ,theta_a,theta_g,theta_f);
-			rc_usleep(100000);
+			rc_usleep(10000);
 		}
 		return 0;
 	}
 
 
-
-	//record data
-	//FILE *f = fopen("data.txt", "w");
 
 	//inititalize imu
 	if(rc_initialize_imu(&imu_data, imu_conf)){

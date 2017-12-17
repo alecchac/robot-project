@@ -9,7 +9,7 @@
 
 #define SAMPLE_RATE_HZ 100	// main filter and control loop speed
 #define DT 0.01			// 1/sample_rate
-#define FILTER_WC 2
+#define FILTER_WC .5
 
 // Structural properties of eduMiP
 #define CAPE_MOUNT_ANGLE		0.32 // increase if mip tends to roll forward
@@ -30,16 +30,14 @@
 #define ENCODER_POLARITY_L		1
 #define ENCODER_POLARITY_R		-1
 
-
-
 /*
-// // inner loop controller 100hz new
+// // inner loop controller 100hz old
 #define 	D1_GAIN					1
 #define 	D1_NUM					{-3.211, 5.469, -2.327}
 #define 	D1_DEN					{ 1.000, -1.572, 0.5724}
 #define 	D1_SATURATION_TIMEOUT	.4
 
-// outer loop controller new 100hz
+// outer loop controller old 100hz
 #define 	D2_GAIN					1
 #define 	D2_NUM					{0.2176,  -0.2059}
 #define 	D2_DEN					{1,  -0.5685}
@@ -68,7 +66,5 @@
 #define START_ANGLE				0.3
 #define START_DELAY				1
 #define PICKUP_DETECTION_TIME	0.6
-#define ENABLE_POSITION_HOLD	1
-#define SOFT_START_SEC			0.7
 
 #endif	//BALANCE_CONFIG
